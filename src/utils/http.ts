@@ -1,4 +1,4 @@
-const USER_AGENT = 'gis-maps-mcp/0.1.0 (https://github.com/phongnd93/gis-maps-mcp)';
+const USER_AGENT = 'gis-maps-mcp/0.1.0 (https://github.com/CogniTool/gis-maps-mcp)';
 
 export interface FetchOptions {
   method?: string;
