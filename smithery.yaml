@@ -1,18 +1,26 @@
-name: gis-maps-mcp
-description: GIS and mapping MCP server with geocoding, spatial analysis, and Vietnam admin lookups
-version: 0.1.0
+name: "@cognitool/gis-maps-mcp"
+description: "GIS and mapping MCP server — 10 tools: geocoding, spatial analysis, Vietnam admin lookup, tile maps, Leaflet export"
+version: 0.2.0
 runtime: node
 entry: dist/index.js
 tools:
-  - name: geocode
-    description: Forward geocoding - convert address to coordinates
-  - name: reverse_geocode
-    description: Reverse geocoding - convert coordinates to address
+  - name: gis_geocode
+    description: Forward geocoding — convert address to coordinates (Nominatim)
+  - name: gis_reverse_geocode
+    description: Reverse geocoding — convert coordinates to address
   - name: calculate_distance
-    description: Calculate distance between two coordinates using Haversine formula
+    description: Calculate Haversine distance between two coordinates
   - name: point_in_polygon
-    description: Check if a point is inside a polygon
+    description: Check if a point is inside a polygon (geofencing)
   - name: bounding_box
     description: Calculate bounding box for a set of coordinates
   - name: vietnam_admin_lookup
     description: Look up Vietnam provinces/districts/wards from coordinates
+  - name: gis_vietnam_provinces
+    description: List 63 Vietnam provinces by region (north/central/south/mekong)
+  - name: gis_xyz_tile
+    description: Calculate XYZ tile coordinates from lat/lng/zoom (OSM, CartoDB, GeoServer)
+  - name: gis_map_server_url
+    description: Generate tile URL templates for OSM, Mapbox, CartoDB, GeoServer
+  - name: gis_geojson_to_leaflet
+    description: Generate Leaflet HTML page from GeoJSON data
