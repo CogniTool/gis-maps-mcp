@@ -1,5 +1,5 @@
 {
-  "name": "@cognitool/gis-maps-mcp",
+  "name": "gis-maps-mcp",
   "version": "0.2.0",
   "description": "MCP Server for GIS and mapping tools focused on Vietnam - geocoding, spatial analysis, and admin lookups",
   "type": "module",
