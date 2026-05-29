@@ -5,16 +5,18 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { registerGeocodingTools } from './tools/geocoding.js';
 import { registerSpatialTools } from './tools/spatial.js';
 import { registerAdminTools } from './tools/admin.js';
+import { registerMapTools } from './tools/maps.js';
 
 const server = new McpServer({
   name: 'gis-maps-mcp',
-  version: '0.1.0',
-  description: 'GIS and mapping MCP server with geocoding, spatial analysis, and Vietnam admin lookups',
+  version: '0.2.0',
+  description: 'GIS and mapping MCP server — 10 tools: geocoding, spatial analysis, Vietnam admin lookup, tile maps, Leaflet export',
 });
 
 registerGeocodingTools(server);
 registerSpatialTools(server);
 registerAdminTools(server);
+registerMapTools(server);
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
