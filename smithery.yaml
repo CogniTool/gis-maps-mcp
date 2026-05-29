@@ -1,0 +1,18 @@
+name: gis-maps-mcp
+description: GIS and mapping MCP server with geocoding, spatial analysis, and Vietnam admin lookups
+version: 0.1.0
+runtime: node
+entry: dist/index.js
+tools:
+  - name: geocode
+    description: Forward geocoding - convert address to coordinates
+  - name: reverse_geocode
+    description: Reverse geocoding - convert coordinates to address
+  - name: calculate_distance
+    description: Calculate distance between two coordinates using Haversine formula
+  - name: point_in_polygon
+    description: Check if a point is inside a polygon
+  - name: bounding_box
+    description: Calculate bounding box for a set of coordinates
+  - name: vietnam_admin_lookup
+    description: Look up Vietnam provinces/districts/wards from coordinates

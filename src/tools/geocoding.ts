@@ -1,91 +1,138 @@
-import type { ToolDefinition } from "../types.js";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import { httpRequest } from '../utils/http.js';
+import type { GeocodeResult, ReverseGeocodeResult } from '../types/index.js';
 
-const NOMINATIM_BASE = "https://nominatim.openstreetmap.org";
+interface NominatimResult {
+  display_name: string;
+  lat: string;
+  lon: string;
+  type: string;
+  importance: number;
+  boundingbox?: string[];
+  address?: Record<string, string>;
+}
 
-export const geocodingTools: ToolDefinition[] = [
-  {
-    name: "gis_geocode",
-    description: "Convert address/place name to coordinates (forward geocoding via Nominatim). For Vietnam, supports Vietnamese addresses, wards, districts, provinces.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        address: { type: "string", description: "Address or place name (e.g. 'Ho Chi Minh City', 'Quận 1, TP HCM')" },
-        country: { type: "string", description: "Country code filter (e.g. 'vn' for Vietnam)" },
-        limit: { type: "number", description: "Max results (default: 5)" },
-      },
-      required: ["address"],
+const NOMINATIM_BASE = 'https://nominatim.openstreetmap.org';
+
+export function registerGeocodingTools(server: McpServer): void {
+  server.tool(
+    'geocode',
+    'Convert an address or place name to geographic coordinates (latitude/longitude) using OpenStreetMap Nominatim. Supports global coverage with no API key required.',
+    {
+      query: z.string().describe('Address or place name to geocode (e.g., "Hanoi, Vietnam", "Ho Chi Minh City")'),
+      country: z.string().optional().describe('Limit search to specific country code (e.g., "vn" for Vietnam)'),
+      limit: z.number().int().min(1).max(10).optional().default(3).describe('Maximum number of results (1-10)'),
+      language: z.string().optional().describe('Preferred language for results (e.g., "vi" for Vietnamese, "en" for English)'),
     },
-    handler: async (args) => {
-      const addr = encodeURIComponent(args.address as string);
-      const country = args.country ? `&countrycodes=${args.country}` : "";
-      const limit = `&limit=${args.limit || 5}`;
-      const url = `${NOMINATIM_BASE}/search?q=${addr}${country}${limit}&format=json`;
-
+    async ({ query, country, limit, language }) => {
       try {
-        const resp = await fetch(url, { headers: { "User-Agent": "MCP-GIS-Maps/0.1.0" } });
-        const data = await resp.json() as Array<Record<string, unknown>>;
-        const results = data.map((r: Record<string, unknown>) => ({
-          display_name: r.display_name,
-          lat: parseFloat(r.lat as string),
-          lon: parseFloat(r.lon as string),
+        const params = new URLSearchParams({
+          q: query,
+          format: 'json',
+          limit: String(limit),
+          addressdetails: '1',
+        });
+
+        if (country) params.set('countrycodes', country);
+        if (language) params.set('accept-language', language);
+
+        const url = `${NOMINATIM_BASE}/search?${params}`;
+        const results = await httpRequest<NominatimResult[]>(url);
+
+        if (!results || results.length === 0) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: `No results found for "${query}"` }, null, 2),
+            }],
+          };
+        }
+
+        const formatted: GeocodeResult[] = results.map((r) => ({
+          displayName: r.display_name,
+          lat: parseFloat(r.lat),
+          lng: parseFloat(r.lon),
           type: r.type,
           importance: r.importance,
+          boundingBox: r.boundingbox
+            ? [parseFloat(r.boundingbox[0]), parseFloat(r.boundingbox[1]), parseFloat(r.boundingbox[2]), parseFloat(r.boundingbox[3])]
+            : undefined,
         }));
-        return { content: [{ type: "text", text: JSON.stringify(results, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: `Geocoding failed. URL: ${url}` }] };
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ query, results: formatted }, null, 2),
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: `Geocoding failed: ${error instanceof Error ? error.message : String(error)}` }, null, 2),
+          }],
+          isError: true,
+        };
       }
+    }
+  );
+
+  server.tool(
+    'reverse_geocode',
+    'Convert geographic coordinates (latitude/longitude) to a human-readable address using OpenStreetMap Nominatim. Returns detailed address components including road, city, state, and country.',
+    {
+      lat: z.number().min(-90).max(90).describe('Latitude (-90 to 90)'),
+      lng: z.number().min(-180).max(180).describe('Longitude (-180 to 180)'),
+      language: z.string().optional().describe('Preferred language for results'),
+      zoom: z.number().int().min(0).max(18).optional().default(18).describe('Detail level: 3=country, 10=city, 18=building'),
     },
-  },
-  {
-    name: "gis_reverse_geocode",
-    description: "Convert coordinates to address (reverse geocoding via Nominatim)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        lat: { type: "number", description: "Latitude" },
-        lng: { type: "number", description: "Longitude" },
-        zoom: { type: "number", description: "Detail level 1-18 (default: 14)" },
-      },
-      required: ["lat", "lng"],
-    },
-    handler: async (args) => {
-      const url = `${NOMINATIM_BASE}/reverse?lat=${args.lat}&lon=${args.lng}&format=json&zoom=${args.zoom || 14}`;
+    async ({ lat, lng, language, zoom }) => {
       try {
-        const resp = await fetch(url, { headers: { "User-Agent": "MCP-GIS-Maps/0.1.0" } });
-        const data = await resp.json() as Record<string, unknown>;
-        return { content: [{ type: "text", text: (data.display_name as string) || JSON.stringify(data) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Reverse geocoding failed" }] };
+        const params = new URLSearchParams({
+          lat: String(lat),
+          lon: String(lng),
+          format: 'json',
+          addressdetails: '1',
+          zoom: String(zoom),
+        });
+
+        if (language) params.set('accept-language', language);
+
+        const url = `${NOMINATIM_BASE}/reverse?${params}`;
+        const result = await httpRequest<NominatimResult>(url);
+
+        if (!result || !result.display_name) {
+          return {
+            content: [{
+              type: 'text' as const,
+              text: JSON.stringify({ error: `No address found for coordinates (${lat}, ${lng})` }, null, 2),
+            }],
+          };
+        }
+
+        const formatted: ReverseGeocodeResult = {
+          displayName: result.display_name,
+          address: result.address || {},
+          lat: parseFloat(result.lat),
+          lng: parseFloat(result.lon),
+        };
+
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify(formatted, null, 2),
+          }],
+        };
+      } catch (error) {
+        return {
+          content: [{
+            type: 'text' as const,
+            text: JSON.stringify({ error: `Reverse geocoding failed: ${error instanceof Error ? error.message : String(error)}` }, null, 2),
+          }],
+          isError: true,
+        };
       }
-    },
-  },
-  {
-    name: "gis_search_places",
-    description: "Search for POIs, landmarks, businesses near a location",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "Search term (e.g. 'restaurant', 'hospital', 'ATM')" },
-        lat: { type: "number", description: "Center latitude" },
-        lng: { type: "number", description: "Center longitude" },
-        radius_m: { type: "number", description: "Search radius in meters (default: 1000)" },
-        limit: { type: "number", description: "Max results (default: 10)" },
-      },
-      required: ["query"],
-    },
-    handler: async (args) => {
-      const q = encodeURIComponent(args.query as string);
-      const lat = args.lat ? `&lat=${args.lat}&lon=${args.lng}` : "";
-      const limit = args.limit || 10;
-      const url = `${NOMINATIM_BASE}/search?q=${q}${lat}&limit=${limit}&format=json`;
-      try {
-        const resp = await fetch(url, { headers: { "User-Agent": "MCP-GIS-Maps/0.1.0" } });
-        const data = await resp.json() as Array<Record<string, unknown>>;
-        return { content: [{ type: "text", text: JSON.stringify(data.slice(0, limit as number).map((r) => r.display_name), null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Search failed" }] };
-      }
-    },
-  },
-];
+    }
+  );
+}

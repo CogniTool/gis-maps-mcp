@@ -1,34 +1,28 @@
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import {
-  CallToolRequestSchema,
-  ListToolsRequestSchema,
-} from "@modelcontextprotocol/sdk/types.js";
-import { geocodingTools } from "./tools/geocoding.js";
-import { spatialTools } from "./tools/spatial.js";
-import { mapTools } from "./tools/maps.js";
+#!/usr/bin/env node
 
-const server = new Server(
-  { name: "gis-maps", version: "0.1.0" },
-  { capabilities: { tools: {} } }
-);
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { registerGeocodingTools } from './tools/geocoding.js';
+import { registerSpatialTools } from './tools/spatial.js';
+import { registerAdminTools } from './tools/admin.js';
 
-const allTools = [...geocodingTools, ...spatialTools, ...mapTools];
-
-server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: allTools.map((t) => ({
-    name: t.name,
-    description: t.description,
-    inputSchema: t.inputSchema,
-  })),
-}));
-
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
-  const tool = allTools.find((t) => t.name === request.params.name);
-  if (!tool) throw new Error(`Unknown tool: ${request.params.name}`);
-  return await tool.handler(request.params.arguments ?? {});
+const server = new McpServer({
+  name: 'gis-maps-mcp',
+  version: '0.1.0',
+  description: 'GIS and mapping MCP server with geocoding, spatial analysis, and Vietnam admin lookups',
 });
 
-const transport = new StdioServerTransport();
-await server.connect(transport);
-console.error("GIS Maps MCP Server running on stdio");
+registerGeocodingTools(server);
+registerSpatialTools(server);
+registerAdminTools(server);
+
+async function main(): Promise<void> {
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  console.error('GIS Maps MCP server started');
+}
+
+main().catch((error) => {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+});

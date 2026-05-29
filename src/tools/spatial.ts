@@ -1,145 +1,147 @@
-import type { ToolDefinition } from "../types.js";
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { z } from 'zod';
+import type { Coordinate, DistanceResult, BoundingBoxResult, PointInPolygonResult } from '../types/index.js';
 
-export const spatialTools: ToolDefinition[] = [
-  {
-    name: "gis_distance",
-    description: "Calculate distance between two points using Haversine formula (great-circle distance)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        lat1: { type: "number", description: "Point 1 latitude" },
-        lng1: { type: "number", description: "Point 1 longitude" },
-        lat2: { type: "number", description: "Point 2 latitude" },
-        lng2: { type: "number", description: "Point 2 longitude" },
-      },
-      required: ["lat1", "lng1", "lat2", "lng2"],
+const EARTH_RADIUS_KM = 6371;
+
+function toRadians(degrees: number): number {
+  return (degrees * Math.PI) / 180;
+}
+
+function haversineDistance(from: Coordinate, to: Coordinate): number {
+  const dLat = toRadians(to.lat - from.lat);
+  const dLng = toRadians(to.lng - from.lng);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(from.lat)) *
+      Math.cos(toRadians(to.lat)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return EARTH_RADIUS_KM * c;
+}
+
+function pointInPolygon(point: Coordinate, polygon: Coordinate[]): boolean {
+  let inside = false;
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i].lng;
+    const yi = polygon[i].lat;
+    const xj = polygon[j].lng;
+    const yj = polygon[j].lat;
+
+    const intersect =
+      yi > point.lat !== yj > point.lat &&
+      point.lng < ((xj - xi) * (point.lat - yi)) / (yj - yi) + xi;
+
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function registerSpatialTools(server: McpServer): void {
+  server.tool(
+    'calculate_distance',
+    'Calculate the great-circle distance between two geographic coordinates using the Haversine formula. Returns distance in kilometers, miles, and meters.',
+    {
+      lat1: z.number().min(-90).max(90).describe('Latitude of first point'),
+      lng1: z.number().min(-180).max(180).describe('Longitude of first point'),
+      lat2: z.number().min(-90).max(90).describe('Latitude of second point'),
+      lng2: z.number().min(-180).max(180).describe('Longitude of second point'),
     },
-    handler: async (args) => {
-      const R = 6371000; // Earth radius in meters
-      const toRad = (d: number) => (d * Math.PI) / 180;
-      const dLat = toRad((args.lat2 as number) - (args.lat1 as number));
-      const dLng = toRad((args.lng2 as number) - (args.lng1 as number));
-      const a = Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(args.lat1 as number)) * Math.cos(toRad(args.lat2 as number)) * Math.sin(dLng / 2) ** 2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const distance = R * c;
-      const km = (distance / 1000).toFixed(2);
-      const miles = (distance / 1609.34).toFixed(2);
-      return {
-        content: [{ type: "text", text: JSON.stringify({
-          meters: Math.round(distance),
-          kilometers: parseFloat(km),
-          miles: parseFloat(miles),
-        }, null, 2) }],
+    async ({ lat1, lng1, lat2, lng2 }) => {
+      const from: Coordinate = { lat: lat1, lng: lng1 };
+      const to: Coordinate = { lat: lat2, lng: lng2 };
+      const distanceKm = haversineDistance(from, to);
+
+      const result: DistanceResult = {
+        distanceKm: Math.round(distanceKm * 1000) / 1000,
+        distanceMiles: Math.round(distanceKm * 0.621371 * 1000) / 1000,
+        distanceMeters: Math.round(distanceKm * 1000),
+        from,
+        to,
       };
-    },
-  },
-  {
-    name: "gis_bbox",
-    description: "Calculate bounding box for a center point + radius (useful for map viewport, spatial queries)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        lat: { type: "number", description: "Center latitude" },
-        lng: { type: "number", description: "Center longitude" },
-        radius_km: { type: "number", description: "Radius in km (default: 5)" },
-      },
-      required: ["lat", "lng"],
-    },
-    handler: async (args) => {
-      const R = 6371; // km
-      const radius = (args.radius_km as number) || 5;
-      const lat = args.lat as number;
-      const lng = args.lng as number;
-      
-      const dLat = (radius / R) * (180 / Math.PI);
-      const dLng = (radius / R) * (180 / Math.PI) / Math.cos(lat * Math.PI / 180);
-      
+
       return {
-        content: [{ type: "text", text: JSON.stringify({
-          sw: { lat: lat - dLat, lng: lng - dLng },
-          ne: { lat: lat + dLat, lng: lng + dLng },
-          center: { lat, lng },
-          radius_km: radius,
-        }, null, 2) }],
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify(result, null, 2),
+        }],
       };
+    }
+  );
+
+  server.tool(
+    'point_in_polygon',
+    'Check if a geographic point lies inside a polygon defined by an array of coordinates. Uses the ray casting algorithm. Useful for geofencing, district boundary checks, etc.',
+    {
+      lat: z.number().min(-90).max(90).describe('Latitude of the point to test'),
+      lng: z.number().min(-180).max(180).describe('Longitude of the point to test'),
+      polygon: z.array(z.object({
+        lat: z.number(),
+        lng: z.number(),
+      })).min(3).describe('Array of polygon vertices (minimum 3 points, in order). Does not need to be closed.'),
     },
-  },
-  {
-    name: "gis_geojson_validate",
-    description: "Validate GeoJSON geometry and calculate properties (area, centroid, bounds)",
-    inputSchema: {
-      type: "object",
-      properties: {
-        geojson: { type: "string", description: "GeoJSON geometry as JSON string" },
-      },
-      required: ["geojson"],
+    async ({ lat, lng, polygon }) => {
+      const point: Coordinate = { lat, lng };
+      const isInside = pointInPolygon(point, polygon);
+
+      const result: PointInPolygonResult = {
+        isInside,
+        point,
+      };
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    }
+  );
+
+  server.tool(
+    'bounding_box',
+    'Calculate the bounding box (minimum and maximum latitude/longitude) for a set of geographic coordinates. Returns the bounding box extent, center point, and width/height.',
+    {
+      coordinates: z.array(z.object({
+        lat: z.number(),
+        lng: z.number(),
+      })).min(1).describe('Array of coordinates to calculate bounding box for'),
     },
-    handler: async (args) => {
-      try {
-        const geom = JSON.parse(args.geojson as string);
-        const type = geom.type || "Unknown";
-        const coords = geom.coordinates;
-        let info = { type, valid: true };
-        
-        if (type === "Point") {
-          info = { ...info, ...{ coordinates: coords } };
-        } else if (type === "Polygon") {
-          const ring = coords[0];
-          info = { ...info, ...{ vertices: ring?.length || 0 } };
-        } else if (type === "MultiPolygon") {
-          info = { ...info, ...{ polygons: coords.length } };
-        }
-        
-        return { content: [{ type: "text", text: JSON.stringify(info, null, 2) }] };
-      } catch {
-        return { content: [{ type: "text", text: "Invalid GeoJSON — failed to parse" }] };
+    async ({ coordinates }) => {
+      let minLat = Infinity;
+      let maxLat = -Infinity;
+      let minLng = Infinity;
+      let maxLng = -Infinity;
+
+      for (const coord of coordinates) {
+        minLat = Math.min(minLat, coord.lat);
+        maxLat = Math.max(maxLat, coord.lat);
+        minLng = Math.min(minLng, coord.lng);
+        maxLng = Math.max(maxLng, coord.lng);
       }
-    },
-  },
-  {
-    name: "gis_postgis_query",
-    description: "Generate PostGIS spatial SQL queries: ST_DWithin, ST_Intersects, ST_Buffer, ST_Distance, KNN",
-    inputSchema: {
-      type: "object",
-      properties: {
-        operation: { type: "string", description: "st_dwithin | st_intersects | st_buffer | st_distance | st_area | st_centroid | st_transform" },
-        table_name: { type: "string", description: "Table with geometry column" },
-        geometry_column: { type: "string", description: "Geometry column name (default: geom)" },
-        lat: { type: "number", description: "Latitude for point-based queries" },
-        lng: { type: "number", description: "Longitude for point-based queries" },
-        distance_m: { type: "number", description: "Distance in meters (for ST_DWithin)" },
-        srid: { type: "number", description: "Target SRID (default: 4326)" },
-      },
-      required: ["operation", "table_name"],
-    },
-    handler: async (args) => {
-      const op = args.operation as string;
-      const table = args.table_name;
-      const geom = (args.geometry_column as string) || "geom";
-      let sql = "";
-      
-      switch (op) {
-        case "st_dwithin":
-          sql = `SELECT * FROM ${table}\nWHERE ST_DWithin(\n  ${geom}::geography,\n  ST_SetSRID(ST_MakePoint(${args.lng}, ${args.lat}), 4326)::geography,\n  ${args.distance_m || 1000}\n)`;
-          break;
-        case "st_intersects":
-          sql = `SELECT * FROM ${table}\nWHERE ST_Intersects(\n  ${geom},\n  ST_SetSRID(ST_MakePoint(${args.lng}, ${args.lat}), 4326)\n)`;
-          break;
-        case "st_buffer":
-          sql = `SELECT ST_Buffer(${geom}::geography, ${args.distance_m || 1000})::geometry AS buffered FROM ${table}`;
-          break;
-        case "st_distance":
-          sql = `SELECT *, ST_Distance(${geom}::geography, ST_SetSRID(ST_MakePoint(${args.lng}, ${args.lat}), 4326)::geography) AS distance_m\nFROM ${table}\nORDER BY ${geom} <-> ST_SetSRID(ST_MakePoint(${args.lng}, ${args.lat}), 4326)\nLIMIT 10`;
-          break;
-        case "st_area":
-          sql = `SELECT *, ST_Area(${geom}::geography) AS area_sqm FROM ${table}`;
-          break;
-        default:
-          sql = `-- PostGIS operation: ${op} on ${table}.${geom}`;
-      }
-      
-      return { content: [{ type: "text", text: sql }] };
-    },
-  },
-];
+
+      const center: Coordinate = {
+        lat: (minLat + maxLat) / 2,
+        lng: (minLng + maxLng) / 2,
+      };
+
+      const result: BoundingBoxResult = {
+        minLat,
+        maxLat,
+        minLng,
+        maxLng,
+        center,
+        width: haversineDistance({ lat: center.lat, lng: minLng }, { lat: center.lat, lng: maxLng }),
+        height: haversineDistance({ lat: minLat, lng: center.lng }, { lat: maxLat, lng: center.lng }),
+      };
+
+      return {
+        content: [{
+          type: 'text' as const,
+          text: JSON.stringify(result, null, 2),
+        }],
+      };
+    }
+  );
+}

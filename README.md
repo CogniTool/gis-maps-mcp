@@ -1,152 +1,129 @@
-# 🗺️ GIS & Maps MCP Server
+# GIS/Maps MCP Server
 
-**MCP Server cho spatial data & bản đồ** — geocoding, PostGIS spatial queries, GeoJSON, tile coordinates, Vietnam provinces. Tối ưu cho GIS developers và map-exploration-app.
+An MCP (Model Context Protocol) server providing GIS and mapping tools with a focus on Vietnam. Enables AI assistants to perform geocoding, spatial analysis, and administrative boundary lookups.
 
-[![MCP](https://img.shields.io/badge/MCP-Protocol-black)](https://modelcontextprotocol.io)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)](https://www.typescriptlang.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+## Problems This Solves
 
----
+### Problem 1: AI Assistants Can't Work with Geographic Data
+Most AI models cannot natively convert addresses to coordinates, calculate distances between locations, or determine if a point falls within a boundary. This makes it impossible to build location-aware applications with AI assistance.
 
-## 🎯 Vấn đề & Giải pháp
+**Solution:** This MCP server provides `geocode` and `reverse_geocode` tools that use the free OpenStreetMap Nominatim API. Any MCP-compatible AI can now convert "Ben Thanh Market, Ho Chi Minh City" to precise coordinates, or identify what address exists at any lat/lng pair.
 
-### 🔴 Vấn đề
+### Problem 2: Spatial Calculations Require Specialized GIS Software
+Determining if a delivery address is within a service zone, calculating distances between locations, or finding the bounding box of a set of points typically requires QGIS, PostGIS, or complex libraries.
 
-Làm việc với GIS và bản đồ, bạn gặp:
+**Solution:** The `calculate_distance`, `point_in_polygon`, and `bounding_box` tools provide these calculations directly. An AI can determine if coordinates (10.7769, 106.7009) are inside Ho Chi Minh City's boundaries, or calculate that Hanoi is 1,167 km from Da Nang.
 
-- **Geocoding thủ công** — mở Google Maps, copy-paste tọa độ, mất thời gian
-- **Tính distance bằng tay** — Haversine formula mỗi lần check khoảng cách giữa 2 điểm
-- **Viết PostGIS SQL nhức đầu** — `ST_DWithin`, `ST_Intersects`, `ST_Buffer` syntax dài dòng
-- **Tile system phức tạp** — không ai nhớ nổi công thức XYZ tile từ lat/lng/zoom
-- **Không có dữ liệu Vietnam provinces sẵn** — mỗi lần cần lại phải tìm/shapefile/import
+### Problem 3: Vietnam Administrative Hierarchy Lookup Is Complex
+Vietnam has a 3-level administrative structure (province → district → ward/commune) with 63 provinces, 700+ districts, and 11,000+ wards. Mapping coordinates to this hierarchy requires specialized data.
 
-### 🟢 Giải pháp
+**Solution:** The `vietnam_admin_lookup` tool reverse-geocodes coordinates and returns the full Vietnamese administrative hierarchy. Useful for logistics, address verification, and regional analysis.
 
-GIS Maps MCP Server biến AI thành **GIS analyst**:
+## Tools
 
-| Trước | Sau |
-|---|---|
-| Mở Google Maps, click phải, copy lat/lng 😫 | `"Geocode Quận 1, TP HCM"` → tọa độ chính xác ✅ |
-| Tính tay Haversine 😩 | `"Khoảng cách Hà Nội → Sài Gòn?"` → km + miles tự động ✅ |
-| Viết PostGIS SQL 5 dòng 😤 | `"Tìm tất cả điểm trong 5km từ (21.02, 105.83)"` → SQL chuẩn ✅ |
-| Code Leaflet từ đầu 😮‍💨 | `"Tạo Leaflet map từ GeoJSON này"` → code snippet hoàn chỉnh ✅ |
-| Copy-paste tile URL từ docs 😵‍💫 | `"Tile URL từ 21.0285, 105.8542 zoom 14"` → URL đầy đủ ✅ |
+### 1. `geocode` — Forward Geocoding
+Convert an address or place name to coordinates.
 
----
-
-## 🧰 Tools (11 công cụ)
-
-### 📍 Geocoding
-
-| Tool | Mô tả |
-|---|---|
-| `gis_geocode` | Chuyển địa chỉ → tọa độ (Nominatim). Hỗ trợ tiếng Việt, phường, quận, tỉnh |
-| `gis_reverse_geocode` | Chuyển tọa độ → địa chỉ |
-| `gis_search_places` | Tìm POI, địa điểm xung quanh (nhà hàng, ATM, bệnh viện...) |
-
-### 📐 Spatial Analysis
-
-| Tool | Mô tả |
-|---|---|
-| `gis_distance` | Tính khoảng cách Haversine giữa 2 điểm (m/km/miles) |
-| `gis_bbox` | Tính bounding box từ center + radius |
-| `gis_geojson_validate` | Validate GeoJSON, phân tích geometry (type, vertices, polygons) |
-| `gis_postgis_query` | Sinh PostGIS SQL: ST_DWithin, ST_Intersects, ST_Buffer, ST_Distance, KNN |
-
-### 🗺️ Map Tools
-
-| Tool | Mô tả |
-|---|---|
-| `gis_xyz_tile` | Tính XYZ tile coordinates → tile URLs cho OSM, Mapbox, GeoServer |
-| `gis_geojson_to_leaflet` | Sinh Leaflet.js code hiển thị GeoJSON trên bản đồ tương tác |
-| `gis_map_server_url` | Generate tile URL cho các provider (OSM, Mapbox, CartoDB, GeoServer) |
-| `gis_vietnam_provinces` | Danh sách 63 tỉnh thành VN phân theo vùng, hỗ trợ GeoJSON |
-
----
-
-## 📦 Cài đặt
-
-### Cách 1: Smithery
-
-```bash
-npx -y @smithery/cli@latest install @mcp-marketplace/gis-maps
+```
+Input:  { "query": "Ho Chi Minh City, Vietnam", "country": "vn" }
+Output: { "lat": 10.8231, "lng": 106.6297, "displayName": "..." }
 ```
 
-### Cách 2: Manual
+### 2. `reverse_geocode` — Reverse Geocoding
+Convert coordinates to a human-readable address.
+
+```
+Input:  { "lat": 21.0285, "lng": 105.8542 }
+Output: { "displayName": "Hanoi, Vietnam", "address": { "city": "Hanoi", ... } }
+```
+
+### 3. `calculate_distance` — Distance Calculation
+Calculate the great-circle distance between two points (Haversine formula).
+
+```
+Input:  { "lat1": 21.0285, "lng1": 105.8542, "lat2": 16.0544, "lng2": 108.2022 }
+Output: { "distanceKm": 627.5, "distanceMiles": 389.9, "distanceMeters": 627500 }
+```
+
+### 4. `point_in_polygon` — Geofencing
+Check if a point lies inside a polygon. Useful for delivery zones, district boundaries.
+
+```
+Input:  { "lat": 10.77, "lng": 106.69, "polygon": [...] }
+Output: { "isInside": true }
+```
+
+### 5. `bounding_box` — Bounding Box Calculator
+Calculate the bounding rectangle for a set of coordinates.
+
+```
+Input:  { "coordinates": [{ "lat": 21.0, "lng": 105.8 }, ...] }
+Output: { "minLat": 8.5, "maxLat": 23.4, "center": { "lat": 15.95, "lng": 106.2 } }
+```
+
+### 6. `vietnam_admin_lookup` — Vietnam Admin Lookup
+Identify Vietnam province/district/ward from coordinates.
+
+```
+Input:  { "lat": 10.7769, "lng": 106.7009 }
+Output: { "province": "Hồ Chí Minh", "district": "Quận 1", "ward": "Bến Nghé" }
+```
+
+## Installation
 
 ```bash
-git clone <repo-url>
-cd gis-maps
 npm install
 npm run build
 ```
 
----
+## Usage
 
-## ⚙️ Cấu hình
+### As an MCP Server (stdio)
 
-### Claude Desktop / Cursor
+```bash
+npm start
+```
+
+### With Claude Desktop
+
+Add to your `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "gis-maps": {
       "command": "node",
-      "args": ["/path/to/gis-maps/dist/index.js"]
+      "args": ["/path/to/gis-maps-mcp/dist/index.js"]
     }
   }
 }
 ```
 
-### Hermes Agent
+### With Smithery
 
-```bash
-hermes mcp add gis-maps --command "node /path/to/gis-maps/dist/index.js"
+This server is compatible with [Smithery](https://smithery.ai/). See `smithery.yaml` for configuration.
+
+## Architecture
+
+```
+src/
+├── index.ts              # MCP server entry point
+├── tools/
+│   ├── geocoding.ts      # geocode + reverse_geocode
+│   ├── spatial.ts        # calculate_distance, point_in_polygon, bounding_box
+│   └── admin.ts          # vietnam_admin_lookup
+├── utils/
+│   └── http.ts           # Shared HTTP client with User-Agent
+└── types/
+    └── index.ts          # TypeScript type definitions
 ```
 
----
+## API Notes
 
-## 🌏 Dùng với map-exploration-app
+- **Nominatim Usage Policy**: This server respects [Nominatim's usage policy](https://operations.osmfoundation.org/policies/nominatim/). It sends a descriptive User-Agent and limits concurrent requests. For heavy usage, consider hosting your own Nominatim instance.
+- **No API Keys Required**: All tools use free, public APIs (OpenStreetMap Nominatim).
+- **Haversine Accuracy**: The distance calculation uses the Haversine formula which assumes a spherical Earth. Accuracy is within ~0.5% for most use cases.
 
-GIS Maps MCP Server tích hợp trực tiếp với [map-exploration-app](https://github.com/phongnd93/map-exploration-app):
+## License
 
-```typescript
-// Frontend query: "Tìm tất cả điểm du lịch trong 10km từ Hà Nội"
-// → gis_geocode "Hà Nội" → (21.0285, 105.8542)
-// → gis_postgis_query st_dwithin, distance=10000
-// → SELECT * FROM pois WHERE ST_DWithin(geom::geography, ...)
-
-// Render map tiles:
-// → gis_xyz_tile for current viewport
-// → gis_map_server_url geoserver + custom layer
-```
-
----
-
-## 🗺️ Roadmap
-
-- [ ] Tích hợp GeoServer REST API (publish layers, edit styles)
-- [ ] Tile server integration (mbtiles, pmtiles)
-- [ ] Load Vietnam shapefile/geojson trực tiếp từ OSM
-- [ ] Cluster analysis (ST_ClusterDBSCAN)
-- [ ] Route tìm đường (OSRM)
-- [ ] Elevation profile từ DEM data
-- [ ] Export ra MapLibre GL JS styles
-
----
-
-## 🛠 Tech Stack
-
-| Layer | Công nghệ |
-|---|---|
-| Runtime | Node.js 22+ |
-| Language | TypeScript 5.6 (strict) |
-| Protocol | MCP SDK 1.12+ |
-| Geocoding | Nominatim (OpenStreetMap) |
-| Validation | Zod 3.23 |
-
----
-
-## 📄 License
-
-MIT © 2025 [phongnd93](https://github.com/phongnd93)
+MIT
